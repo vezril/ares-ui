@@ -4,6 +4,11 @@ name: Release
 # main. The tag pattern is the first gate: malformed tags (e.g. v1.2) never
 # trigger this workflow. Mirrors the sibling per-service UIs' release gates.
 #
+# Degrades gracefully: when the DOCKERHUB_* secrets are absent (e.g. a freshly
+# created repo, or a UI Codex has not decided to publish yet), the image steps
+# skip and the release still succeeds — it never hard-fails on missing secrets.
+# Wire the secrets and re-run to publish; no workflow change is needed then.
+#
 # Third-party actions are pinned to full commit SHAs — a mutable tag on a
 # workflow that holds registry credentials is a supply-chain hole.
 on:
@@ -41,29 +46,40 @@ jobs:
             exit 1
           fi
 
-      # Fail before any build/push if credentials are absent (no partial publish).
-      - name: Ensure Docker Hub credentials are present
+      # Degrade gracefully when Docker Hub is not wired: `secrets.*` cannot be
+      # read in an `if:`, so probe the credentials here and expose a boolean
+      # output. Every image step below is gated on it — a fresh repo without the
+      # DOCKERHUB_* secrets skips the publish and the release still succeeds,
+      # rather than hard-failing. Wire the secrets (or run dockerhub-setup) and
+      # re-run to publish; no workflow change is then needed.
+      - name: Check Docker Hub credentials
+        id: check
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
-          if [ -z "$DOCKERHUB_USERNAME" ] || [ -z "$DOCKERHUB_TOKEN" ]; then
-            echo "ERROR: DOCKERHUB_USERNAME / DOCKERHUB_TOKEN secret is missing"
-            exit 1
+          if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "Docker Hub credentials present — will publish."
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::DOCKERHUB_USERNAME / DOCKERHUB_TOKEN not set — skipping image publish."
           fi
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Derive version
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
+      - name: Log in to Docker Hub
+        if: steps.check.outputs.publish == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       # Semver image tags are immutable — only :latest ever moves.
       - name: Enforce semver tag immutability
+        if: steps.check.outputs.publish == 'true'
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           VERSION: ${{ steps.version.outputs.version }}
@@ -75,9 +91,11 @@ jobs:
           echo "OK: $VERSION is not yet published"
 
       - name: Set up Docker Buildx
+        if: steps.check.outputs.publish == 'true'
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       - name: Build and push X.Y.Z + latest
+        if: steps.check.outputs.publish == 'true'
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
@@ -90,3 +108,9 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Publish skipped (no Docker Hub credentials)
+        if: steps.check.outputs.publish != 'true'
+        run: |
+          echo "Release ${GITHUB_REF_NAME} tagged, image publish skipped — DOCKERHUB_* secrets not set."
+          echo "Wire them (or run dockerhub-setup) and re-run this workflow to publish calvinference/${IMAGE_NAME}:${{ steps.version.outputs.version }}."
