@@ -1,0 +1,48 @@
+# Reference manifests for the Codex GitOps repo (apps/ares-ui/). Mirrors how
+# hermes-ui / apollo-ui are wired: a GitRepository pointing at this repo, and a
+# HelmRelease rendering deploy/charts/ares-ui with the endpoints pointed at
+# the in-cluster Services. Copy into codex apps/ares-ui/ and pin a released
+# image tag.
+#
+# NOTE: there is no Flux on this cluster yet (k3s 1.21, deliberately deferred) —
+# deploys are manual `helm upgrade -f <mirrored-values>` from the TAGGED chart.
+# These manifests document the intended shape and the values to mirror.
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: ares-ui
+  namespace: flux-system
+spec:
+  interval: 5m
+  url: https://github.com/vezril/ares-ui
+  ref:
+    branch: main
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: ares-ui
+  namespace: ares-ui
+spec:
+  interval: 10m
+  chart:
+    spec:
+      chart: deploy/charts/ares-ui
+      sourceRef:
+        kind: GitRepository
+        name: ares-ui
+        namespace: flux-system
+  values:
+    image:
+      repository: calvinference/aresui
+      tag: 0.1.0
+    replicaCount: 1
+    apiBase: /api/ares
+    ares:
+      # ares-service likely runs as Docker Compose on the dedicated laptop node,
+      # not in-cluster — point this at that node once it exposes an HTTP surface.
+      endpoint: http://ares.ares.svc.cluster.local:8087
+      liveStream: false
+    ingress:
+      enabled: false

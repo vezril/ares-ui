@@ -1,0 +1,66 @@
+# Default values for the Ares UI chart.
+#
+# Cluster reality (per Codex): single-node k3s on a QNAP. Conservative defaults —
+# one replica, ingress OFF (turn it on once cert-manager/TLS exists). Note Ares
+# itself likely runs as Docker Compose on the dedicated laptop node, not k8s
+# (USB + privileged + host-net) — so `ares.endpoint` may point at that node
+# rather than an in-cluster Service. Coordinate the run shape with Codex.
+
+image:
+  # Docker Hub is the source of truth. NOTE: the Docker Hub account is
+  # `calvinference`, which is NOT the GitHub org name — this has bitten deploys.
+  repository: calvinference/aresui
+  # Pin a released semver tag in production (matches the release workflow).
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+# Browser client selector (NOT a secret): the same-origin BFF base path.
+# NEXT_PUBLIC_* is inlined at BUILD time (the Dockerfile bakes "/api/ares"), so
+# this value governs only the server tier's copy — keep the two in sync. Here for
+# completeness, not a knob that changes the browser's behaviour.
+apiBase: "/api/ares"
+
+# The Ares service — the BFF reads its /health and (later) its survey stream.
+# ares-service is a CLI today with no HTTP surface, so the health pill reads
+# "Down" and the survey runs off the built-in mock until the service exposes an
+# endpoint; set liveStream=true once it does.
+ares:
+  endpoint: "http://ares.ares.svc.cluster.local:8087"
+  # false → BFF serves the built-in mock survey (default until ares-service
+  # exposes a live stream). true → proxy ares.endpoint's stream.
+  liveStream: false
+
+service:
+  port: 80
+  targetPort: 3000
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+ingress:
+  # OFF by default: no ingress TLS on the cluster yet. Enable once cert-manager exists.
+  enabled: false
+  # Load-bearing empty string: no IngressClass resource exists on this cluster and
+  # k3s's Traefik silently ignores named classes. The template OMITS the field
+  # entirely when this is empty — an empty-string ingressClassName is
+  # RFC-1123-invalid and Kubernetes rejects the object outright.
+  className: ""
+  host: ares-ui.homelab
+  clusterIssuer: ""
+  tlsSecretName: ""
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  fsGroup: 1001
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

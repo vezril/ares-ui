@@ -1,0 +1,132 @@
+name: CI
+
+# Verifies every pull request targeting development or main: lint, type-check,
+# unit tests, a production build, and Helm chart validity. Merging is blocked
+# unless all required checks pass (branch protection). Mirrors the sibling
+# per-service UIs.
+#
+# Third-party actions are pinned to full commit SHAs: a mutable tag is a
+# supply-chain hole, and this workflow can read the repo.
+on:
+  pull_request:
+    branches: [development, main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: CI only reads the repository. Nothing here publishes.
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint (eslint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+
+  typecheck:
+    name: Type-check (tsc)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+
+  test:
+    name: Unit tests (vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Includes the survey-reducer PRIVACY test: foreign RF must stay an
+      # aggregate (counts + spoof flags), never a per-device list — the "no
+      # neighbourhood surveillance board" rule enforced in the wire contract.
+      - run: npm test
+
+  build:
+    name: Build (next build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+          NEXT_PUBLIC_ARES_API_BASE: /api/ares
+      - name: The same-origin BFF base must be inlined into the browser bundle
+        # NEXT_PUBLIC_* is a BUILD-time inline, not a runtime read. If it does not
+        # land in the chunks, the shipped image would call the wrong origin (or
+        # nothing) with no error anywhere — so assert it, don't assume it.
+        #
+        # Match the PATH, not a quoting style. Next 15 emitted the constant as
+        # "/api/ares"; Next 16's minifier folds it straight into the template
+        # literal (fetch(`/api/ares${path}`)), so the quoted form never
+        # appears and a quote-anchored grep fails on a perfectly good bundle.
+        run: |
+          if ! grep -rqF '/api/ares' .next/static/chunks/; then
+            echo "::error::NEXT_PUBLIC_ARES_API_BASE did not reach the built browser chunks"
+            exit 1
+          fi
+          echo "OK: /api/ares is inlined in the browser bundle"
+
+          # The failure this guard really exists to prevent is an environment-specific
+          # upstream being baked into code the browser runs. Those hosts belong only
+          # in server-side BFF handlers, never in a client chunk.
+          if grep -rqE 'https?://[a-z0-9.-]*\.svc\.cluster\.local' .next/static/chunks/; then
+            echo "::error::an in-cluster upstream URL leaked into the browser bundle"
+            grep -rhoE 'https?://[a-z0-9.-]*\.svc\.cluster\.local' .next/static/chunks/ | sort -u
+            exit 1
+          fi
+          echo "OK: no in-cluster upstream URLs in the browser bundle"
+
+  chart:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - name: Lint
+        run: helm lint deploy/charts/ares-ui --set ingress.enabled=true --set ingress.host=ci.local
+      - name: An empty ingress class must be OMITTED, not rendered empty
+        # A null ingressClassName is not the same as no ingressClassName — an
+        # empty string is RFC-1123-invalid and Kubernetes rejects the object
+        # outright, so the host 404s while the release looks healthy.
+        run: |
+          helm template a deploy/charts/ares-ui \
+            --set ingress.enabled=true --set ingress.host=ci.local > /tmp/default.yaml
+          if grep -q "ingressClassName" /tmp/default.yaml; then
+            echo "::error::the default render emits ingressClassName; it must be omitted when empty"
+            grep -n "ingressClassName" /tmp/default.yaml
+            exit 1
+          fi
+      - name: An explicit ingress class must still be rendered
+        run: |
+          helm template a deploy/charts/ares-ui \
+            --set ingress.enabled=true --set ingress.host=ci.local \
+            --set ingress.className=nginx | grep -q 'ingressClassName: "nginx"' \
+            || { echo "::error::an explicitly set class was dropped"; exit 1; }
+      - name: Disabled ingress renders no Ingress at all
+        run: |
+          if helm template a deploy/charts/ares-ui | grep -q "kind: Ingress"; then
+            echo "::error::ingress.enabled=false still rendered an Ingress"; exit 1
+          fi

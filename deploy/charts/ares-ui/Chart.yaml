@@ -1,0 +1,9 @@
+apiVersion: v2
+name: ares-ui
+description: >-
+  Ares UI — the wireless survey & findings console. A standalone Next.js server that also hosts
+  the BFF routes reading the Ares service's survey stream and /health. Own-scope detail, foreign
+  aggregate only. Internal by default; enable ingress once TLS exists.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
