@@ -109,3 +109,21 @@ export interface ScopeResponse {
   ownBssidCount: number;
   activeEnabled: boolean;
 }
+
+// --- findings (the security.wifi.finding events, for the board) ---------------
+
+export type Severity = "info" | "low" | "medium" | "high" | "critical";
+
+export interface Finding {
+  id: string;
+  /** ISO 8601. */
+  at: string;
+  /** e.g. rogue_ap, passphrase_weak, deauth_test_completed. */
+  kind: string;
+  severity: Severity;
+  summary: string;
+  bssid?: string | null;
+  /** Apollo content-address of an associated capture — never the blob itself,
+   *  and never a secret. */
+  captureRef?: string | null;
+}

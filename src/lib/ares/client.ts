@@ -1,4 +1,4 @@
-import type { HealthResponse, ScopeResponse } from "./types";
+import type { Finding, HealthResponse, ScopeResponse } from "./types";
 
 /**
  * The browser's only data surface: the same-origin BFF. `NEXT_PUBLIC_*` is
@@ -23,10 +23,12 @@ async function json<T>(path: string): Promise<T> {
 export const api = {
   health: () => json<HealthResponse>("/health"),
   scope: () => json<ScopeResponse>("/scope"),
+  findings: () => json<Finding[]>("/findings"),
 };
 
 /** Query keys, centralised so refetches and invalidations cannot drift. */
 export const keys = {
   health: ["ares", "health"] as const,
   scope: ["ares", "scope"] as const,
+  findings: ["ares", "findings"] as const,
 };
