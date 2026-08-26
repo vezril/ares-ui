@@ -1,0 +1,39 @@
+{{- if .Values.ingress.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "ares-ui.fullname" . }}
+  labels:
+    {{- include "ares-ui.labels" . | nindent 4 }}
+  {{- if .Values.ingress.clusterIssuer }}
+  annotations:
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.clusterIssuer | quote }}
+  {{- end }}
+spec:
+  {{- /*
+    Load-bearing guard: OMIT ingressClassName entirely when className is empty.
+    An empty-string value is RFC-1123-invalid and Kubernetes rejects the whole
+    object; a null one is not the same as an absent one either. This bit
+    artemis-ui across two releases.
+  */}}
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className | quote }}
+  {{- end }}
+  {{- if and .Values.ingress.tlsSecretName .Values.ingress.host }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host | quote }}
+      secretName: {{ .Values.ingress.tlsSecretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "ares-ui.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
+{{- end }}

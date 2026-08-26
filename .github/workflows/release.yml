@@ -1,0 +1,92 @@
+name: Release
+
+# Publishes a Docker image to Docker Hub when a semver tag vX.Y.Z is pushed on
+# main. The tag pattern is the first gate: malformed tags (e.g. v1.2) never
+# trigger this workflow. Mirrors the sibling per-service UIs' release gates.
+#
+# Third-party actions are pinned to full commit SHAs — a mutable tag on a
+# workflow that holds registry credentials is a supply-chain hole.
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+# Least privilege: this workflow only reads the repo. The registry push
+# authenticates with Docker Hub secrets, not with GITHUB_TOKEN.
+permissions:
+  contents: read
+
+env:
+  # NOTE: the Docker Hub account is `calvinference`, NOT the GitHub org — the
+  # account comes from DOCKERHUB_USERNAME, and this is only the image name.
+  IMAGE_NAME: aresui
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0 # full history for the ancestry check
+
+      # A tag must sit on main to release (prevents releasing a feature branch).
+      - name: Verify tag is on main
+        run: |
+          git fetch origin main
+          if git merge-base --is-ancestor "${{ github.sha }}" origin/main; then
+            echo "OK: ${{ github.ref_name }} is an ancestor of main"
+          else
+            echo "ERROR: tag ${{ github.ref_name }} is not on main — refusing to release"
+            exit 1
+          fi
+
+      # Fail before any build/push if credentials are absent (no partial publish).
+      - name: Ensure Docker Hub credentials are present
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -z "$DOCKERHUB_USERNAME" ] || [ -z "$DOCKERHUB_TOKEN" ]; then
+            echo "ERROR: DOCKERHUB_USERNAME / DOCKERHUB_TOKEN secret is missing"
+            exit 1
+          fi
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Derive version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      # Semver image tags are immutable — only :latest ever moves.
+      - name: Enforce semver tag immutability
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if docker manifest inspect "$DOCKERHUB_USERNAME/$IMAGE_NAME:$VERSION" >/dev/null 2>&1; then
+            echo "ERROR: $DOCKERHUB_USERNAME/$IMAGE_NAME:$VERSION already exists — semver tags are immutable"
+            exit 1
+          fi
+          echo "OK: $VERSION is not yet published"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Build and push X.Y.Z + latest
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          push: true
+          # The same-origin BFF base is baked in the builder stage (see Dockerfile).
+          build-args: |
+            NEXT_PUBLIC_ARES_API_BASE=/api/ares
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

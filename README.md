@@ -32,4 +32,33 @@ what shouldn't exist.
 only, per-god accent — Ares = crimson; same build/deploy conventions as the other consoles).
 Deploys are the Codex session's. Owner/coordination per `codex/docs/session-coordination.md`.
 
-Seeded 2026-08-26 — UI is a later slice; the passive service comes first.
+## Development
+
+Next.js 16 + React 19 + Tailwind v4, same stack as the sibling consoles. Node 22+.
+
+```bash
+npm install
+npm run dev            # http://localhost:3000
+npm run lint && npm run typecheck && npm test && npm run build
+```
+
+The **survey cockpit runs with no radio and no live service**: the BFF's
+`/api/ares/stream` is fed by an in-process mock survey source (`ARES_LIVE_STREAM`
+unset), so `npm run dev` shows live own-APs, client drill-in, foreign aggregate,
+and an intermittent rogue-AP alert out of the box. When ares-service exposes an
+SSE endpoint, flip `ARES_LIVE_STREAM=1` and the browser code + wire contract are
+unchanged — that's the BFF seam.
+
+Layout: `src/lib/ares/types.ts` (the wire contract — **no foreign per-device
+type exists**, the privacy rule in the type system) · `src/lib/ares/survey.ts`
+(the reducer, unit-tested) · `src/lib/ares/server/` (BFF config + mock source,
+`server-only`) · `src/app/api/ares/*` (health, stream/SSE, scope route handlers)
+· `src/components/ares/survey-console.tsx` (the cockpit, adapted from the
+deprecated shodan console) · `src/app/globals.css` (crimson accent over the
+dionysus base). Chart in `deploy/charts/ares-ui`; CI (eslint, tsc, vitest, build,
+helm) in `.github/workflows`.
+
+Started 2026-08-26 from the shodan cockpit (which Calvin is deprecating), restyled
+to the constellation crimson/dark standard and re-shaped to Ares' privacy model.
+Survey is live (mock-backed); Posture and Findings are honest empty-state stubs
+until ares-service emits that data.
