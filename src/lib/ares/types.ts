@@ -112,6 +112,21 @@ export interface ScopeResponse {
 
 // --- findings (the security.wifi.finding events, for the board) ---------------
 
+export type SecurityGrade = "good" | "fair" | "weak";
+export type PassphraseStatus = "untested" | "held" | "weak";
+
+/** One own AP's self-assessment, from GET /posture. */
+export interface PostureItem {
+  bssid: string;
+  ssid: string | null;
+  channel: number | null;
+  band: Band | null;
+  security: Security;
+  securityGrade: SecurityGrade;
+  passphraseStatus: PassphraseStatus;
+  rogueSpoof: boolean;
+}
+
 export type Severity = "info" | "low" | "medium" | "high" | "critical";
 
 export interface Finding {
