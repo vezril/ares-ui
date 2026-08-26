@@ -1,4 +1,4 @@
-import type { Finding, HealthResponse, ScopeResponse } from "./types";
+import type { Finding, HealthResponse, PostureItem, ScopeResponse } from "./types";
 
 /**
  * The browser's only data surface: the same-origin BFF. `NEXT_PUBLIC_*` is
@@ -24,6 +24,7 @@ export const api = {
   health: () => json<HealthResponse>("/health"),
   scope: () => json<ScopeResponse>("/scope"),
   findings: () => json<Finding[]>("/findings"),
+  posture: () => json<PostureItem[]>("/posture"),
 };
 
 /** Query keys, centralised so refetches and invalidations cannot drift. */
@@ -31,4 +32,5 @@ export const keys = {
   health: ["ares", "health"] as const,
   scope: ["ares", "scope"] as const,
   findings: ["ares", "findings"] as const,
+  posture: ["ares", "posture"] as const,
 };
