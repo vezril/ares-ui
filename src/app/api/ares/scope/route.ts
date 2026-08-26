@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { mockSurveyEnabled } from "@/lib/ares/server/config";
+import { aresEndpoint, mockSurveyEnabled } from "@/lib/ares/server/config";
+import { describeError, timedFetch } from "@/lib/ares/server/upstream";
 import type { ScopeResponse } from "@/lib/ares/types";
 
 export const runtime = "nodejs";
@@ -26,7 +27,15 @@ export async function GET() {
     };
     return NextResponse.json(body);
   }
-  // Live path not yet wired; report an empty, honest scope rather than inventing.
-  const body: ScopeResponse = { ownSsids: [], ownBssidCount: 0, activeEnabled: false };
-  return NextResponse.json(body);
+  // Live: read the service's own /scope (same ScopeResponse shape). Unreachable
+  // reports an empty, honest scope rather than inventing one.
+  try {
+    const resp = await timedFetch(`${aresEndpoint()}/scope`);
+    if (resp.ok) return NextResponse.json((await resp.json()) as ScopeResponse);
+  } catch (e) {
+    // fall through to the empty scope; the health pill already signals "Down".
+    void describeError(e);
+  }
+  const empty: ScopeResponse = { ownSsids: [], ownBssidCount: 0, activeEnabled: false };
+  return NextResponse.json(empty);
 }
